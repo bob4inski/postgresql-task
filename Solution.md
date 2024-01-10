@@ -109,10 +109,10 @@ limit 5;
  generate_series($1,$2) as region(text), generate_series(current_date, current_date + interval $3, interval +|
  $4)                                                                                                        +|
  as sale_date(date)                                                                                          |
+ UPDATE pgbench_branches SET bbalance = bbalance + $1 WHERE bid = $2                                         | 17283.668098999995
+ UPDATE pgbench_tellers SET tbalance = tbalance + $1 WHERE tid = $2                                          |  14549.27690499996
  select extract($1 from sale_date) as boba from test_partitioning_table group by boba                        |         4752.27858
  select count(id) from test_partitioning_table                                                               | 1736.8796610000002
- create database bench                                                                                       |         235.645686
- copy pgbench_accounts from stdin                                                                            |         209.202257
 ```
 
 #### postgres_fdw
@@ -122,16 +122,31 @@ limit 5;
 
 
 ### 4. Секционирование
-Создайте таблицу
-                CREATE TABLE IF NOT EXISTS test_partitioning_table (
+Создайте таблицу. С помощью generate_series сгенериуйте десять миллионов записей и вставьте их в таблицу.
+Секционируйте эту таблицу по годам по полю sale_date
+```sql 
+CREATE TABLE IF NOT EXISTS test_partitioning_table (
                                id serial,
                                region text,
                                sale_date date not null
-                ); 
-С помощью generate_series сгенериуйте десять миллионов записей и вставьте их в таблицу.
-Секционируйте эту таблицу по годам по полю sale_date
+                )
+            PARTITION BY RANGE (sale_date);
+
+-- таблицу создали и потом необходимо создать партиции для таблицы
+
+create table test_partitioning_table_2020_2039 partition of test_partitioning_table
+for VALUES from ('2020-01-01') to ('2039-12-31');
+
+-- и потом уже делать insert в таблицу
+insert into test_partitioning_table (region, sale_date)
+select region, sale_date from
+generate_series(1,100) as region(text), generate_series('2023-01-01','2023-12-31' , interval '1 day') as sale_date(date);
+
+```
+
+
  
-### 5.	Анализ блокировок
+### 5.	[Анализ блокировок](https://www.youtube.com/watch?v=8FIUWUrq474&t=1303) 
 Настройте логирование сервера так, чтобы в журнал сообщений сбрасывалась информация о блокировках, удерживаемых более 200 миллисекунд.
 Воспроизведите ситуацию, при которой в журнале появятся такие сообщения:
 Смоделируйте ситуацию обновления одной и той же строки тремя командами UPDATE в разных сеансах. Изучите возникшие
@@ -140,13 +155,37 @@ limit 5;
 Могут ли две транзакции, выполняющие единственную команду UPDATE одной и той же таблицы (без where), заблокировать друг друга?
  
 ### 6. Резервное копирование и восстановление
-       pg_dump
-                Создайте копию (дамп) базы данных testdb утилитой pg_dump в формате directory.
-                После создания дампа, зайдите в psql и удалите базу данных testdb.
-                Восстановите базу данных используя дамп. Убедитесь, что база данных восстановилась.
-       pg_basebackup
-                Создайте резервную копию экземпляра утилитой pg_basebackup в виде tar-файла. Выполните несколько обновляющих транзакций, создайте точку восстановления и выполните еще несколько транзакций.
-                Остановите экземпляр и восстановите его с резервной копии по состоянию на точку восстановления.
+#### pg_dump
+Создайте копию (дамп) базы данных testdb утилитой pg_dump в формате directory. (а у меня ж есть таблица test_partitioning_table ее мы и задампим )
+После создания дампа, зайдите в psql и удалите базу данных testdb.
+Восстановите базу данных используя дамп. Убедитесь, что база данных восстановилась.
+```bash
+pg_dump -Fd testdb -f /tmp/testdb
+[postgres@postgres-main ~]$ ls /tmp/testdb/
+4282.dat.gz  toc.dat
+```
+```sql
+drop database testdb ;
+DROP DATABASE
+```
+Далее создаем целевую бд в psql и восстанавливаем таблицы через pg_restore
+```bash
+pg_restore  -d testdb -Fd /tmp/testdb/
+
+testdb=# \dt
+                             List of relations
+ Schema |               Name                |       Type        |  Owner
+--------+-----------------------------------+-------------------+----------
+ public | test_partitioning_table           | partitioned table | postgres
+ public | test_partitioning_table_2020_2039 | table             | postgres
+(2 rows)
+```
+
+
+
+#### pg_basebackup
+Создайте резервную копию экземпляра утилитой pg_basebackup в виде tar-файла. Выполните несколько обновляющих транзакций, создайте точку восстановления и выполните еще несколько транзакций.
+Остановите экземпляр и восстановите его с резервной копии по состоянию на точку восстановления.
 ### 7.	Потоковая репликация
 Создайте виртуальную машину PG2 с техническими характеристиками как у виртуальной машины PG1. Выполните пункты 1-3 для ВМ PG2.
  Настройте потоковую репликацию между узлами PG1 и PG2, где PG1 мастер, а PG2 - реплика. Настройте синхронную репликацию.
