@@ -11,14 +11,21 @@ task from mario
 Примонтировать Disk1 в директорию /pgsql/pg_data. 
 Владелец директории postgres.postgres. Права 700
 ```bash
-sudo mkdir -p  psql/pg_data/14
-sudo chown -R postgres:postgres psql
-```
-3. Выполните инициализацию экземпляра с помощью утилиты initdb в раздел /pgsql/pg_data/14.
-```bash
-sudo postgresql-14-setup initdb --pgdata=/psql/pg_data/14
+sudo mkdir -p  /psql/pg_data/14
+sudo chown -R postgres:postgres /psql
 ```
 
+3. Выполните инициализацию экземпляра с помощью утилиты initdb в раздел /pgsql/pg_data/14.
+```bash
+sudo -iu postgres
+/usr/pgsql-14/bin/initdb -D /psql/pg_data/14/
+```
+либо же другой способ
+```bash
+sudo nano /lib/systemd/system/postgresql-14.service
+# Environment=PGDATA=/psql/pg_data/ поменять на свое
+sudo  systemctl daemon-reload
+```
 ## Сами задания
 ### 1. Роли и группы:
 - Создайте новую базу данных testdb
@@ -70,6 +77,7 @@ grant readonly to testread;
  Произведите расчет параметров shared_buffers, work_mem, maintenance_work_mem, effective_cache_size, random_page_cost, effective_io_concurrency
  и измените их в конфиг-файле postgresql.conf
  Произведите перезагрузку экземпляра и убедитесь, что параметры вступили в силу.
+ В целом с этим помогает этот [сайт](https://pgconfigurator.cybertec.at/)
 
 ### 3.	Установка дополнительных расширений
 Установите в пользовательской БД testdb расширения pg_stat_statesments, postgres_fdw, pg_profile.
@@ -119,7 +127,43 @@ limit 5;
 
 Создайте базу данных fdw. Установите в ней расширение postgres_fdw. Импортируйте в базу данных fdw таблицу testnm.t1 из базы данных testdb. 
 Попробуйте выполнить вставку новых значений в импортированную внешнюю таблицу testnm.t1
+1. необходимо включить расширение
+```sql
+CREATE EXTENSION postgres_fdw;
 
+CREATE SERVER foreign_server
+        FOREIGN DATA WRAPPER postgres_fdw
+        OPTIONS (host 'localhost', port '5432', dbname 'test2');
+
+CREATE USER MAPPING FOR postgres
+        SERVER foreign_server
+        OPTIONS (user 'postgres', password 'postgres');
+
+CREATE FOREIGN TABLE t1 (
+        c1 int
+)
+        SERVER foreign_server
+        OPTIONS (schema_name 'test_schema', table_name 't1');
+```
+2. Пробуем вставить значения в таблицу 
+```sql
+fdw=# insert into t1 values (1);
+INSERT 0 1
+fdw=# select * from t1;
+ c1
+----
+  1
+  1
+(2 rows)
+
+fdw=# \c test2
+test2=# select * from test_schema.t1 ;
+ c1
+----
+  1
+  1
+(2 rows)
+```
 
 ### 4. Секционирование
 Создайте таблицу. С помощью generate_series сгенериуйте десять миллионов записей и вставьте их в таблицу.
@@ -134,25 +178,113 @@ CREATE TABLE IF NOT EXISTS test_partitioning_table (
 
 -- таблицу создали и потом необходимо создать партиции для таблицы
 
-create table test_partitioning_table_2020_2039 partition of test_partitioning_table
-for VALUES from ('2020-01-01') to ('2039-12-31');
+create table test_partitioning_table_2020 partition of test_partitioning_table
+for VALUES from ('2020-01-01') to ('2021-01-01');
 
 -- и потом уже делать insert в таблицу
 insert into test_partitioning_table (region, sale_date)
+
 select region, sale_date from
 generate_series(1,100) as region(text), generate_series('2023-01-01','2023-12-31' , interval '1 day') as sale_date(date);
+
+-- сюда большой insert не ставил, тк сильно грузит бдт
 
 ```
 
 
  
 ### 5.	[Анализ блокировок](https://www.youtube.com/watch?v=8FIUWUrq474&t=1303) 
-Настройте логирование сервера так, чтобы в журнал сообщений сбрасывалась информация о блокировках, удерживаемых более 200 миллисекунд.
-Воспроизведите ситуацию, при которой в журнале появятся такие сообщения:
-Смоделируйте ситуацию обновления одной и той же строки тремя командами UPDATE в разных сеансах. Изучите возникшие
+1. Настройте логирование сервера так, чтобы в журнал сообщений сбрасывалась информация о блокировках, удерживаемых более 200 миллисекунд.
+```sql
+-- Для проверки текущих значений логгироваия и блокировок 
+postgres=# show log_lock_waits;
+ log_lock_waits
+----------------
+ on
+(1 row)
+
+postgres=# show deadlock_timeout;
+ deadlock_timeout
+------------------
+ 200ms
+(1 row)
+
+alter system set deadlock_timeout = 200;
+alter system set log_lock_waits = on;
+
+```
+также указал, что надо логгировать всё:
+```
+log_min_duration_statement = 0
+log_statement = 'all'
+```
+```bash
+#необходимо перезапустить сервер
+systemctl restart postgresql-14.service
+```
+2. Воспроизведите ситуацию, при которой в журнале появятся такие сообщения:
+3. Смоделируйте ситуацию обновления одной и той же строки тремя командами UPDATE в разных сеансах. Изучите возникшие
 блокировки в представлении pg_locks и убедитесь, что все они понятны. Выпишите список блокировок и объясните, что значит
-каждая. Воспроизведите взаимоблокировку трех транзакций. Можно ли разобраться в ситуации постфактум, изучая журнал сообщений?
-Могут ли две транзакции, выполняющие единственную команду UPDATE одной и той же таблицы (без where), заблокировать друг друга?
+каждая. 
+```sql
+create database locks;  
+
+create table test_locks 
+(
+    id int, 
+    "name" text
+); 
+
+insert into test_locks (id, "name") values                                    
+(1, 'robert'),                                                                
+(2, 'mario'),                                                                 
+(3,'boba');
+```
+открываю сразу несколько терминалов, чтобы посмотреть что будет с блокировками
+
+```
+   locktype    |  pid  |  relation  | virtxid | xid  |       mode       | granted                                                                             
+---------------+-------+------------+---------+------+------------------+---------                                                                           
+ relation      | 38298 | test_locks |         |      | RowExclusiveLock | t                                                                                   
+ transactionid | 38298 |            |         | 3929 | ExclusiveLock    | t                                                                                
+ virtualxid    | 38298 |            | 6/82    |      | ExclusiveLock    | t
+ -------------------------------------------------------------------------
+ relation      | 38300 | test_locks |         |      | RowExclusiveLock | t                                                                                    
+ transactionid | 38300 |            |         | 3930 | ExclusiveLock    | t                                                                                  
+ transactionid | 38300 |            |         | 3929 | ShareLock        | f                                                                                  
+ tuple         | 38300 | test_locks |         |      | ExclusiveLock    | t                                                                                   
+ virtualxid    | 38300 |            | 5/10    |      | ExclusiveLock    | t         
+--------------------------------------------------------------------------------                                                                         
+ relation      | 38301 | test_locks |         |      | RowExclusiveLock | t                                                                                   
+ transactionid | 38301 |            |         | 3931 | ExclusiveLock    | t                                                                                   
+ tuple         | 38301 | test_locks |         |      | ExclusiveLock    | f                                                                                   
+ virtualxid    | 38301 |            | 4/504   |      | ExclusiveLock    | t                                                                                   
+(12 rows)
+```
+С помощью select pg_blocking_pids(); смотрю, какая транзакция какую блокирует
+и они блокируются по очереди
+300 ждет 298, а 301 ждет 300
+В транзакции 300 показывается, что мы пытаемся получить данные из  share, но пока что не может тк предыдущая транзакция еще не завершилась
+И при завершении первой транзакции подобная картина будет уже со следущими транзакциями
+```
+2024-01-12 14:11:47.395 MSK [38298] LOG:  statement: update test_locks set name = 'test' where id = 1;                                                       
+2024-01-12 14:11:47.595 MSK [38298] LOG:  process 38298 still waiting for ShareLock on transaction 3930 after 200.161 ms                                    
+2024-01-12 14:11:47.595 MSK [38298] DETAIL:  Process holding the lock: 38300. Wait queue: 38301, 38298.                                                    
+2024-01-12 14:11:47.595 MSK [38298] CONTEXT:  while updating tuple (0,7) in relation "test_locks"                                                           
+2024-01-12 14:11:47.595 MSK [38298] STATEMENT:  update test_locks set name = 'test' where id = 1;
+```
+4. Воспроизведите взаимоблокировку трех транзакций. Можно ли разобраться в ситуации постфактум, изучая журнал сообщений?
+смотрим лог и выполняем транзакции и что мы видим
+Я сделал примерно также, как и [тут](https://github.com/radchenkoam/OTUS-postgres-2020-05/issues/7)
+В целом понятно по логу, тк описан каждый шаг транзакции и потом показывается какая транзакция какую прерывает
+```log
+2024-01-12 14:24:34.024 MSK [38301] LOG:  process 38301 detected deadlock while waiting for ShareLock on transaction 3935 after 200.160 ms      
+2024-01-12 14:24:34.024 MSK [38301] ERROR:  deadlock detected
+2024-01-12 14:24:34.024 MSK [38301] DETAIL:  Process 38301 waits for ShareLock on transaction 3935; blocked by process 38298.            
+        Process 38298 waits for ShareLock on transaction 3936; blocked by process 38300.                                                                 
+        Process 38300 waits for ShareLock on transaction 3937; blocked by process 38301.
+```
+5. Могут ли две транзакции, выполняющие единственную команду UPDATE одной и той же таблицы (без where), заблокировать друг друга?
  
 ### 6. Резервное копирование и восстановление
 #### pg_dump
@@ -186,6 +318,12 @@ testdb=# \dt
 #### pg_basebackup
 Создайте резервную копию экземпляра утилитой pg_basebackup в виде tar-файла. Выполните несколько обновляющих транзакций, создайте точку восстановления и выполните еще несколько транзакций.
 Остановите экземпляр и восстановите его с резервной копии по состоянию на точку восстановления.
+```bash
+pg_basebackup --format=tar -z -D /tmp/postgres_archive_2 -Ft -Xf
+rm -rf /psql/pg_data/14
+tar -xzf /tmp/postgres_archive_2/base.tar.gz  -C /psql/pg_data/14/
+chmod -R 700  /psql/pg_data/14/
+```
 ### 7.	Потоковая репликация
 Создайте виртуальную машину PG2 с техническими характеристиками как у виртуальной машины PG1. Выполните пункты 1-3 для ВМ PG2.
  Настройте потоковую репликацию между узлами PG1 и PG2, где PG1 мастер, а PG2 - реплика. Настройте синхронную репликацию.
