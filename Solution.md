@@ -328,6 +328,7 @@ pg_basebackup --format=tar -z -D /tmp/postgres_archive_2 -Ft -Xf
 rm -rf /psql/pg_data/14
 tar -xzf /tmp/postgres_archive_2/base.tar.gz  -C /psql/pg_data/14/
 chmod -R 700  /psql/pg_data/14/
+# далее просто запускаем postgres
 ```
 ### 7.	[Потоковая репликация](https://dbaclass.com/article/how-to-configure-streaming-replication-in-postgres-14/)
 Создайте виртуальную машину PG2 с техническими характеристиками как у виртуальной машины PG1.
@@ -353,21 +354,107 @@ primary_conninfo = 'user=repl_user passfile=''/root/.pgpass'' channel_binding=pr
 
 2. Создайте на мастере PG1 в БД  testdb таблицу test_replication c произвольным набором колонок, заполнитне таблицу используя generate_series. Проверьте что данные появились на реплике и содержимое таблицы test_replication совпадают на мастере и на реплике.
 
-Выполните переключение (switchover) мастера таким образом, чтобы PG2 стал мастером, а PG1-репликой.
+3. Выполните переключение ([switchover](https://dbaclass.com/article/how-to-do-switchover-in-postgres/)) мастера таким образом, чтобы PG2 стал мастером, а PG1-репликой.
 
-
-
+on master:
+```bash
+sudo -iu postgres
+/usr/pgsql-14/bin/pg_ctl stop -D /psql/pg_data/14/
 ```
-sudo cat /psql/pg_data/14/postgresql.auto.conf
+on slave
+```bash
+[postgres@postgres-slave ~]$ /usr/pgsql-14/bin/pg_ctl  promote -D /psql/pg_data/14
+waiting for server to promote.... done
+server promoted
 ```
+
+on old-master 
+```bash
+touch /psql/pg_data/14/standby.signal
+nano postgresql.auto.conf 
+#insert smth like this 
+#primary_conninfo = 'user=repl_user passfile=''/root/.pgpass'' channel_binding=prefer host=10.0.3.6 port=5432 sslmode=prefer sslcompression=0 sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres target_session_attrs=any'
+
+/usr/pgsql-14/bin/pg_ctl start -D /psql/pg_data/14/
+```
+
 ### 8.	Обновление версии
 Используя утилиту pg_upgrade попробуйте выполнить обновление с 14 на 15 версию PostgreSQL на всех узлах установленного в предыдущем пункте отказоустойчивого кластера. 
-Дополнительные задачи со звездочкой
+1. on master
+```bash
+mkdir /psql/pg_data/15
+sudo yum install postgresql15-contrib postgresql15 postgresql15-libs postgresql15-server
+```
+2. Далее повторить пункты из установки
+3. Остановить сервер и запустить обновление 
+```bash
+/usr/pgsql-15/bin/pg_ctl -D /psql/pg_data/14 stop
+
+/usr/pgsql-15/bin/pg_upgrade -d /psql/pg_data/14 -D /psql/pg_data/15 -b /usr/pgsql-14/bin -B /usr/pgsql-15/bin
+/usr/pgsql-15/bin/pg_ctl -D /psql/pg_data/15 start
+```
+on slave:
+1. Установить новую версию
+```bash
+mkdir /psql/pg_data/15
+sudo yum install postgresql15-contrib postgresql15 postgresql15-libs postgresql15-server
+```
+2. проинициализировать бд
+3. rsync с мастера (но у меня не получилось, поэтому я сделаю чуть иначе)
+```bash
+rsync --archive --delete --hard-links --size-only --no-inc-recursive /psql/pg_data/14 /psql/pg_data/15 10.0.3.6:/psql/pg_data/15
+```
+Сделал в итоге так, с rsync надо проверять еще
+```bash
+pg_basebackup -D /psql/pg_data/14 -X fetch -p 5432 -U repl_user -h  10.0.3.8 -R
+```
+4. Запуск и проверка
+```sql
+postgres=# select * from pg_stat_replication \gx
+-[ RECORD 1 ]----+------------------------------
+pid              | 43348
+usesysid         | 24576
+usename          | repl_user
+application_name | walreceiver
+client_addr      | 10.0.3.8
+client_hostname  |
+client_port      | 37238
+backend_start    | 2024-01-15 17:54:31.209473+03
+backend_xmin     |
+state            | streaming
+sent_lsn         | 0/25000060
+write_lsn        | 0/25000060
+flush_lsn        | 0/25000060
+replay_lsn       | 0/25000060
+write_lag        |
+flush_lag        |
+replay_lag       |
+sync_priority    | 0
+sync_state       | async
+reply_time       | 2024-01-15 17:56:11.411474+03
+```
+
+
+
+## Дополнительные задачи со звездочкой
 1)	**Установка дополнительного расширения pg_profile**
 Установите расширение pg_profile в любой в базе данных bench.
 Запустите нагрузочное тестирование используя pgbench. Пока идет тестирование подключитесь к БД bench и снимите отчет используя функцию profile.take_sample().
 Сгенерируйте html-отчет на основе созданного сэмпла.
+```bash
+wget https://github.com/zubkov-andrei/pg_profile/releases/download/4.3/pg_profile--4.3.tar.gz
+sudo tar -xzf pg_profile--4.3.tar.gz -C /usr/pgsql-14/share/extension/
+```
 
+
+```sql
+CREATE SCHEMA profile;
+CREATE EXTENSION pg_profile SCHEMA profile;
+create extension pg_stat_statements;
+```
+```bash
+psql -d "bench" -Aqtc "SELECT profile.get_report(tstzrange(now()-interval '1 day',now()))" -o report_0900_1000.html
+```
 2)	**Логическая репликация**
 Разорвите потоковую репликацию, настроенную в предыдущей задаче. Выполните promote реплики, удалите слот репликации с мастера.
 Переопределите значение параметра wal_level на logical на PG1 и cоздайте таблицу logrepl c полями (id serial, val text). Создайте публикацию данной таблицы на PG1 и подпишитесь на публикацию на PG2.
