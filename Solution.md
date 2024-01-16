@@ -321,8 +321,8 @@ testdb=# \dt
 
 
 #### pg_basebackup
-Создайте резервную копию экземпляра утилитой pg_basebackup в виде tar-файла. Выполните несколько обновляющих транзакций, создайте точку восстановления и выполните еще несколько транзакций.
-Остановите экземпляр и восстановите его с резервной копии по состоянию на точку восстановления.
+1. Создайте резервную копию экземпляра утилитой pg_basebackup в виде tar-файла.
+Удалите/измените несколько таблиц и остановите экземпляр
 ```bash
 pg_basebackup --format=tar -z -D /tmp/postgres_archive_2 -Ft -Xf
 rm -rf /psql/pg_data/14
@@ -330,6 +330,68 @@ tar -xzf /tmp/postgres_archive_2/base.tar.gz  -C /psql/pg_data/14/
 chmod -R 700  /psql/pg_data/14/
 # далее просто запускаем postgres
 ```
+2. Выполните несколько обновляющих транзакций, создайте точку восстановления и выполните еще несколько транзакций.
+Остановите экземпляр и восстановите его с резервной копии по состоянию на точку восстановления.
+[подсказка](https://www.scalingpostgres.com/tutorials/postgresql-backup-point-in-time-recovery/)
+
+1. Для начала создадим папку в которой будем валы сохранять
+```bash
+mkdir /var/lib/postgresql/pg_log_archive
+nano /psql/pg_data/15/postgresql.conf
+```
+2. Изменить `postgresql.conf`
+```yml
+wal_level = replica
+archive_mode = on # (change requires restart)
+archive_command = 'test ! -f /var/lib/postgresql/pg_log_archive/%f && cp %p /var/lib/postgresql/pg_log_archive/%f'
+```
+3. перзапустить постгрес и создать архив 
+```bash
+sudo systemctl restart postgresql-15.service
+
+pg_basebackup --format=tar -z -D /tmp/postgres_archive_2 -Ft -Xf
+```
+4. Делаем определенные манипуляции с бд
+```sql
+create database test;
+\c test
+create table test_table (id int);
+insert into test_table values (1),(2),(3);
+
+--<time is ~2024-01-16 14:50:00>
+--archive the logs
+select pg_switch_wal();
+--уже после точки восстановления
+insert into test_table values (10),(22),(33);
+```
+5. Останавливает экземпляр, и восстанавливаем из бекапа
+```bash
+systemctl stop postgresql-15.service
+
+mv /psql/pg_data/15/ /psql/pg_data/15-old
+mkdir /psql/pg_data/15/
+tar -xzf /tmp/postgres_archive_2/base.tar.gz  -C /psql/pg_data/15/
+```
+6. Определяем точку до которой нужно восстановиться
+```bash
+nano nano /psql/pg_data/15/postgresql.conf
+        restore_command = 'cp /var/lib/postgresql/pg_log_archive/%f %p'
+        recovery_target_time = '2024-01-16 14:50:00'
+
+sudo systemctl restart postgresql-15.service
+```
+7. Проверка
+```sql
+test=# select * from test_table;
+ id
+----
+  1
+  2
+  3
+(3 rows)
+```
+
+
 ### 7.	[Потоковая репликация](https://dbaclass.com/article/how-to-configure-streaming-replication-in-postgres-14/)
 Создайте виртуальную машину PG2 с техническими характеристиками как у виртуальной машины PG1.
 
