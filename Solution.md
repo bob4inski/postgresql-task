@@ -522,7 +522,47 @@ psql -d "bench" -Aqtc "SELECT profile.get_report(tstzrange(now()-interval '1 day
 Переопределите значение параметра wal_level на logical на PG1 и cоздайте таблицу logrepl c полями (id serial, val text). Создайте публикацию данной таблицы на PG1 и подпишитесь на публикацию на PG2.
 Наполните таблицу logrepl данными и убедитесь, что данные среплицировались на PG2.
 Удалите логическую репликацию.
+1. 
+```
+psql -U postgres -c "ALTER SYSTEM SET wal_level = logical"
+```
+on master:
+```sql
+create role repl_user with Replication Login password 'repl_user';
+CREATE DATABASE replica_logical;
+\c replica_logical
+create table logrepl(id serial, val text);
+CREATE PUBLICATION logrepl_pub FOR TABLE logrepl;
+
+replica_logical=#         \dRp
+                             List of publications
+    Name     |  Owner   | All tables | Inserts | Updates | Deletes | Truncates
+-------------+----------+------------+---------+---------+---------+-----------
+ logrepl_pub | postgres | f          | t       | t       | t       | t
+(1 row)
+```
+on slave:
+```sql
+create database replica_logical;
+\c replica_logical
+create table logrepl(id serial, val text);
+
+CREATE SUBSCRIPTION mysub
+CONNECTION 'host=10.0.3.8 port=5432 user=repl_user dbname=replica_logical'
+PUBLICATION logrepl_pub;
+replica_logical=#     \dRs
+           List of subscriptions
+ Name  |  Owner   | Enabled |  Publication
+-------+----------+---------+---------------
+ mysub | postgres | t       | {logrepl_pub}
+(1 row)
+```
+
+
 3)	**Восстановление с помощью pg_probackup к заданной точке во времени (Point in time recovery)**
+
+Как будто я это сделал в пункте 6
+
 Произведите установку pg_probackup на узле PG1.
 Подключите к серверу PG1 новый диск для создания и хранения резервных копий.
 Смонтируйте этот диск в раздел /pgsql/backup
