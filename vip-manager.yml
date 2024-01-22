@@ -4,9 +4,9 @@
 interval: 1000
 
 # the etcd or consul key which vip-manager will regularly poll.
-trigger-key: "/service/pgcluster/leader"
+trigger-key: "/service/aboba-1/leader"
 # if the value of the above key matches the trigger-value (often the hostname of this host), vip-manager will try to add the virtual ip address to the interface specified in Iface
-trigger-value: "pgcluster_member1"
+trigger-value: "postgres-master"
 
 ip: 10.0.3.100 # the virtual ip address to manage
 netmask: 24 # netmask for the virtual ip
