@@ -499,7 +499,7 @@ reply_time       | 2024-01-15 17:56:11.411474+03
 
 
 ## Дополнительные задачи со звездочкой
-1)	**Установка дополнительного расширения pg_profile**
+###	**Установка дополнительного расширения pg_profile**
 Установите расширение pg_profile в любой в базе данных bench.
 Запустите нагрузочное тестирование используя pgbench. Пока идет тестирование подключитесь к БД bench и снимите отчет используя функцию profile.take_sample().
 Сгенерируйте html-отчет на основе созданного сэмпла.
@@ -517,7 +517,7 @@ create extension pg_stat_statements;
 ```bash
 psql -d "bench" -Aqtc "SELECT profile.get_report(tstzrange(now()-interval '1 day',now()))" -o report_0900_1000.html
 ```
-2)	**Логическая репликация**
+###	**Логическая репликация**
 Разорвите потоковую репликацию, настроенную в предыдущей задаче. Выполните promote реплики, удалите слот репликации с мастера.
 Переопределите значение параметра wal_level на logical на PG1 и cоздайте таблицу logrepl c полями (id serial, val text). Создайте публикацию данной таблицы на PG1 и подпишитесь на публикацию на PG2.
 Наполните таблицу logrepl данными и убедитесь, что данные среплицировались на PG2.
@@ -559,7 +559,7 @@ replica_logical=#     \dRs
 ```
 
 
-3)	**Восстановление с помощью pg_probackup к заданной точке во времени (Point in time recovery)**
+###	**Восстановление с помощью pg_probackup к заданной точке во времени (Point in time recovery)**
 
 Как будто я это сделал в пункте 6
 
@@ -570,7 +570,7 @@ replica_logical=#     \dRs
 Снимите полную резервную копию экземпляра. Настройте непрерывное архивирование WAL-журналов.
 Зафиксируйте время, затем удалите БД testdb. Попробуйте выполнить PITR-восстановление. Удаленная БД восстановилась?
 
-4)	**Развертывание типового решения master-slave**
+###	**Развертывание типового решения master-slave**
 Одним из типовых решений ЦК СУБД является отказоустойчивая конфигурация Patroni кластера (рисунок ниже), состоящая из:
 1.	2 Сервера БД (PG1 и PG2)
 2.	3 Сервера DCS Consul (DCS1, DCS2, DCS3).
@@ -664,15 +664,156 @@ sudo systemctl restart patroni
 5.	Установите на PG1 и PG2 и настройте ПО VIP-manager (предварительно выделите соседний IP из этой же подсети
 ```bash
 sudo dnf install vip-manager
-echo "net.ipv4.ip_nonlocal_bind = 1"  >> /etc/sysctl.conf
+sudo echo "net.ipv4.ip_nonlocal_bind = 1"  >> sudo  /etc/sysctl.conf
 sysctl -p
 ```
 скопировать [конфиг](vip-manager.yml)
 ```bash
 sudo nano /etc/default/vip-manager.yml
+sudo systemctl start vip-manager
 ```
-Запустите службу Patroni, проверьте состояние кластера командой patronictl list
-Попробуйте выполнить switchover мастера с узла PG1 на узел PG2, а затем failover c PG2 на PG1. Чем отличается failover от switchover в patroni cluster? Что означает TL в выводе команды patronictl list?
-Измените параметр max_connections используя patronictl edit-config. Что поменялось в выводе команды patronictl list? 
-Попробуйте выполнить switchover используя консольную утилиту curl и Patroni REST API.
+- Запустите службу Patroni, проверьте состояние кластера командой patronictl list
+```bash
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running   |  2 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | streaming |  2 |         0 | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+```
+- Попробуйте выполнить switchover мастера с узла PG1 на узел PG2
+```bash
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml switchover
+Current cluster topology
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running   |  2 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | streaming |  2 |         0 | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+Primary [postgres-master]: postgres-master
+Candidate ['postgres-slave'] []: postgres-slave
+When should the switchover take place (e.g. 2024-01-22T18:21 )  [now]: now
+Are you sure you want to switchover cluster aboba-1, demoting current leader postgres-master? [y/N]: y
+2024-01-22 17:21:46.82532 Successfully switched over to "postgres-slave"
++ Cluster: aboba-1 (7326896891755228528) ---------+----+-----------+-----------------+
+| Member          | Host      | Role    | State   | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | stopped |    |   unknown | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running |  2 |           | *               |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) ---------+----+-----------+-----------------+
+| Member          | Host      | Role    | State   | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | stopped |    |   unknown | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running |  3 |           | *               |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | streaming |  3 |         0 | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running   |  3 |           | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+```
+- а затем failover c PG2 на PG1.
+```bash
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml failover
+Current cluster topology
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | streaming |  3 |         0 | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running   |  3 |           | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+Candidate ['postgres-master'] []: postgres-master
+Are you sure you want to failover cluster aboba-1, demoting current leader postgres-slave? [y/N]: y
+2024-01-22 17:23:38.62252 Successfully failed over to "postgres-master"
++ Cluster: aboba-1 (7326896891755228528) ---------+----+-----------+-----------------+
+| Member          | Host      | Role    | State   | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running |  3 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | stopped |    |   unknown | *               |
++-----------------+-----------+---------+---------+----+-----------+-----------------+
+```
+- Чем отличается failover от switchover в patroni cluster? 
+автоматическое контролируемого (switchover) и аварийное (failover) переключение
+при аварийном мы не можем выбрать время
+- Что означает TL в выводе команды patronictl list?
+Timeline - но еще не прогуглил что это такое
+
+- Измените параметр max_connections используя patronictl edit-config.
+```bash
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml edit-config
+---
++++
+@@ -6,7 +6,7 @@
+     archive_mode: 'on'
+     archive_timeout: 1800s
+     hot_standby: 'on'
+-    max_connections: '2500'
++    max_connections: '3500'
+     max_locks_per_transaction: '8192'
+     max_replication_slots: '5'
+     max_wal_senders: '5'
+
+Apply these changes? [y/N]: y
+Configuration changed
+``` 
+Что поменялось в выводе команды patronictl list? ничего(
+
+- Попробуйте выполнить switchover используя консольную утилиту curl и Patroni REST API.
+Команды: 
+#### Switchover
+```bash
+curl -s http://10.0.3.8:8008/switchover -XPOST -d '{"leader":"postgres-slave","candidate":"postgres-master"}'
+```
+```
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | streaming |  5 |         0 | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running   |  5 |           | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+[redos@postgres-main ~]$ curl -s http://10.0.3.8:8008/switchover -XPOST -d '{"leader":"postgres-slave","candidate":"postgres-master"}'
+Successfully switched over to "postgres-master"[redos@postgres-main ~]$
+[redos@postgres-main ~]$
+[redos@postgres-main ~]$
+[redos@postgres-main ~]$
+[redos@postgres-main ~]$
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running   |  6 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | streaming |  6 |         0 | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+```
+#### Faiover
+```bash
+curl -s http://10.0.3.8:8008/failover -XPOST -d '{"candidate":"postgres-slave"}'
+```
+
+```bash
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running   |  6 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | streaming |  6 |         0 | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+[redos@postgres-main ~]$ curl -s http://10.0.3.8:8008/failover -XPOST -d '{"candidate":"postgres-slave"}'
+Successfully failed over to "postgres-slave"[redos@postgres-main ~]$
+[redos@postgres-main ~]$
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) ----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State    | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Replica | starting |    |   unknown | *               |
+| postgres-slave  | 10.0.3.11 | Leader  | running  |  7 |           | *               |
++-----------------+-----------+---------+----------+----+-----------+-----------------+
+```
 
