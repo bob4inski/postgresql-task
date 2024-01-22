@@ -1,4 +1,4 @@
-scope: aboba
+scope: aboba-test
 namespace: /service/
 name: "postgres-main"
 
