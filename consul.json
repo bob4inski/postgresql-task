@@ -1,0 +1,30 @@
+{
+    "bind_addr": "0.0.0.0",
+    "bootstrap_expect": 3,
+    "client_addr": "0.0.0.0",
+    "datacenter": "dc1",
+    "data_dir": "/var/lib/consul",
+    "domain": "consul",
+    "enable_script_checks": true,
+    "dns_config": {
+        "enable_truncate": true,
+        "only_passing": true
+    },
+    "enable_syslog": true,
+    "encrypt": "zpjf5a4reDbJFpT6FeaF0LGxD0zBRPSRbIoUkLBt0ps=",
+    "leave_on_terminate": true,
+    "log_level": "INFO",
+    "rejoin_after_leave": true,
+    "retry_join": [
+        "10.0.3.13",
+        "10.0.3.15",
+        "10.0.3.17"
+    ],
+    "server": true,
+    "start_join": [
+        "10.0.3.13",
+        "10.0.3.15",
+        "10.0.3.17"
+    ],
+   "ui_config": { "enabled": true }
+}

@@ -569,16 +569,65 @@ replica_logical=#     \dRs
 Произведите инициализацию и настройку pg_probackup c хранением РК в каталоге /pgsql/backup.
 Снимите полную резервную копию экземпляра. Настройте непрерывное архивирование WAL-журналов.
 Зафиксируйте время, затем удалите БД testdb. Попробуйте выполнить PITR-восстановление. Удаленная БД восстановилась?
+
 4)	**Развертывание типового решения master-slave**
 Одним из типовых решений ЦК СУБД является отказоустойчивая конфигурация Patroni кластера (рисунок ниже), состоящая из:
 1.	2 Сервера БД (PG1 и PG2)
 2.	3 Сервера DCS Consul (DCS1, DCS2, DCS3).
 3.	ПО VIP-manager для однозначного определения мастер-сервера.
 Для создания отказоустойчивой конфигурации создайте соответствующие ВМ для DCS Consul (1 ядро, 512 МБ RAM)
+
+*Задания*:
+[consul](https://georgechilumbu.wordpress.com/2016/11/27/setup-consul-service-discovery-for-ha/) 
 1.	Установите на PG1 и PG2 оркестратор репликации Patroni и Postgres (если он еще не установлен).
+```bash
+sudo dnf install -y patroni patroni-consul
+sudo pip3 install patroni[all]
+```
 2.	Установите на DCS1, DCS2, DCS3 ПО Consul и настройте в режиме работы server
+```bash
+sudo dnf install -y consul
+sudo adduser consul
+sudo mkdir -p /etc/consul.d/
+sudo mkdir /var/consul
+sudo chown consul:consul -R /var/consul
+sudo touch /etc/consul.d/config.json
+```
+[config.json](consul.json)
+```bash
+sudo consul agent -config-file=/etc/consul.d/config.json > /tmp/agent.log&
+[redos@dcs1 ~]$ consul members
+Node            Address         Status  Type    Build   Protocol  DC   Partition  Segment
+dcs1.novalocal  10.0.3.15:8301  alive   server  1.14.5  2         dc1  default    <all>
+dcs2.novalocal  10.0.3.13:8301  alive   server  1.14.5  2         dc1  default    <all>
+dcs3.novalocal  10.0.3.17:8301  alive   server  1.14.5  2         dc1  default    <all>
+```
 3.	Установите на PG1 и PG2 ПО Consul и настройте в режиме работы client
+[client config](consul.hcl)
+```bash
+sudo dnf install -y consul
+sudo adduser consul
+sudo mkdir -p /etc/consul.d/
+sudo mkdir /var/consul
+sudo chown consul:consul -R /var/consul
+sudo touch /etc/consul.d/config.json
+sudo nano /etc/consul.d/config.hcl
+
+sudo consul agent -config-file=/etc/consul.d/config.hcl > /tmp/agent.log&
+```
+```bash
+[redos@dcs1 ~]$ consul members
+Node                      Address         Status  Type    Build   Protocol  DC   Partition  Segment
+dcs1.novalocal            10.0.3.15:8301  alive   server  1.14.5  2         dc1  default    <all>
+dcs2.novalocal            10.0.3.13:8301  alive   server  1.14.5  2         dc1  default    <all>
+dcs3.novalocal            10.0.3.17:8301  alive   server  1.14.5  2         dc1  default    <all>
+postgres-main.novalocal   10.0.3.8:8301   alive   client  1.14.5  2         dc1  default    <default>
+postgres-slave.novalocal  10.0.3.11:8301  alive   client  1.14.5  2         dc1  default    <default>
+```
+
 4.	Настройте оркестратор репликации Patroni в режиме master-replica (Leader – Sync Standy).
+sudo nano /etc/patroni/patroni.yml
+
 5.	Установите на PG1 и PG2 и настройте ПО VIP-manager (предварительно выделите соседний IP из этой же подсети
  
 Запустите службу Patroni, проверьте состояние кластера командой patronictl list
