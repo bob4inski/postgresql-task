@@ -1,10 +1,10 @@
-scope: aboba-test
+scope: aboba-1
 namespace: /service/
-name: "postgres-main"
+name: "postgres-master"
 
 restapi:
-    listen: "10.0.3.11:8008"
-    connect_address: "10.0.3.11:8008"
+    listen: "10.0.3.8:8008"
+    connect_address: "10.0.3.8:8008"
 
 consul:
   host: localhost:8500
@@ -38,11 +38,8 @@ bootstrap:
   - data-checksums
 
   pg_hba:
-  - host replication replicator 127.0.0.1/32 md5
-  - host replication replicator 10.0.3.8/32 md5
-  - host replication replicator 10.0.3.11/32 md5
-  - host all all 10.0.3.0/24 md5
-  - host all all 0.0.0.0/0 md5
+  - host all all 10.0.3.0/24 trust
+  - host replication replicator 10.0.3.0/24 trust
 
   users:
     admin:
@@ -52,8 +49,8 @@ bootstrap:
         - createdb
 
 postgresql:
-  listen: "10.0.3.11:5432"
-  connect_address: "10.0.3.11:5432"
+  listen: "10.0.3.8:5432"
+  connect_address: "10.0.3.8:5432"
   data_dir: /psql/pg_data/15
   bin_dir: /usr/pgsql-15/bin/
   pgpass: /tmp/pgpass

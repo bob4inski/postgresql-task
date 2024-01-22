@@ -626,10 +626,51 @@ postgres-slave.novalocal  10.0.3.11:8301  alive   client  1.14.5  2         dc1 
 ```
 
 4.	Настройте оркестратор репликации Patroni в режиме master-replica (Leader – Sync Standy).
-sudo nano /etc/patroni/patroni.yml
+
+А вот тут самый веселый момент
+1. Только на мастере инициализировать базу
+Добавить строки в pg_hba.conf
+```conf
+host    replication     all     10.0.3.0/24     trust
+host    all     all     10.0.3.0/24     trust
+```
+2. Скопировать конфигурационный [файл](patroni.yml) в `/etc/patroni/patroni.yml` 
+2. Запустить патрони и проверить
+```bash
+sudo systemctl restart patroni
+[redos@postgres-main ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -------+----+-----------+-----------------+
+| Member          | Host     | Role   | State   | TL | Lag in MB | Pending restart |
++-----------------+----------+--------+---------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8 | Leader | running |  2 |           | *               |
++-----------------+----------+--------+---------+----+-----------+-----------------+
+```
+3. зайти в psql и создать роль
+```sql
+create role replicator with replication login password 'replicator';
+```
+4. Зайти на вторую ноду и скопировать конфиг и запустить патрони
+```
+sudo systemctl restart patroni
+[redos@postgres-slave ~]$ patronictl -c /etc/patroni/patroni.yml list
++ Cluster: aboba-1 (7326896891755228528) -----------+----+-----------+-----------------+
+| Member          | Host      | Role    | State     | TL | Lag in MB | Pending restart |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+| postgres-master | 10.0.3.8  | Leader  | running   |  2 |           | *               |
+| postgres-slave  | 10.0.3.11 | Replica | streaming |  2 |         0 | *               |
++-----------------+-----------+---------+-----------+----+-----------+-----------------+
+```
 
 5.	Установите на PG1 и PG2 и настройте ПО VIP-manager (предварительно выделите соседний IP из этой же подсети
- 
+```bash
+sudo dnf install vip-manager
+echo "net.ipv4.ip_nonlocal_bind = 1"  >> /etc/sysctl.conf
+sysctl -p
+```
+скопировать [конфиг](vip-manager.yml)
+```bash
+sudo nano /etc/default/vip-manager.yml
+```
 Запустите службу Patroni, проверьте состояние кластера командой patronictl list
 Попробуйте выполнить switchover мастера с узла PG1 на узел PG2, а затем failover c PG2 на PG1. Чем отличается failover от switchover в patroni cluster? Что означает TL в выводе команды patronictl list?
 Измените параметр max_connections используя patronictl edit-config. Что поменялось в выводе команды patronictl list? 
