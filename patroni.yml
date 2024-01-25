@@ -14,6 +14,7 @@ consul:
 bootstrap:
   dcs:
     ttl: 30
+    synchronous_mode: true
     loop_wait: 10
     retry_timeout: 10
     maximum_lag_on_failover: 1048576
@@ -32,6 +33,7 @@ bootstrap:
         archive_timeout: 1800s
         archive_command: /bin/true
         max_connections: "2500"
+
 
   initdb:
   - encoding: UTF8
